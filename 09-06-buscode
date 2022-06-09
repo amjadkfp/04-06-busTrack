@@ -1,0 +1,223 @@
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <ArduinoJson.h>
+#include <ArduinoOTA.h>
+#include <ESP8266HTTPClient.h>
+#include <ESP8266WiFi.h>
+#include <SoftwareSerial.h>
+#include <TinyGPS++.h>
+#include <WiFiClientSecure.h>
+#include <Wire.h>
+
+#define SCREEN_WIDTH 128  // OLED display width, in pixels
+
+#define SCREEN_HEIGHT 64  // OLED display height, in pixels
+#define UP_switch D5
+#define DOWN_switch D6
+// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+TinyGPSPlus gps;  // The TinyGPS++ object
+
+SoftwareSerial ss(2, 0);  // The serial connection to the GPS device
+
+const char* ssid = "fiber";
+const char* password = "56948446";
+const char* serverName = "https://548ebd.deta.dev/location/new";  // post
+float latitude, longitude;
+
+int year, month, date, hour, minute, second;
+
+String date_str, time_str, lat_str, lng_str;
+String output;
+StaticJsonDocument<196> doc;
+// int pm;
+
+// int numreadings = 10;
+
+String latarray[20];
+
+String lngarray[20];
+
+// String current_latarray[10], current_lngarray[10], previous_latarray[10],
+// previous_lngarray[10] ;
+
+unsigned int i = 0;
+
+const unsigned long Interval = 13000;
+
+unsigned long previousTime = 0;
+
+void setup()
+
+{
+  pinMode(UP_switch, INPUT_PULLUP);
+  pinMode(DOWN_switch, INPUT_PULLUP);
+  Serial.begin(115200);
+
+  ss.begin(9600);
+
+  delay(2000);  // Pause for 2 seconds
+
+  Serial.println();
+
+  Serial.print("Connecting to ");
+
+  Serial.println(ssid);
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED)
+
+  {
+    delay(500);
+
+    Serial.print(".");
+  }
+
+  Serial.println("");
+
+  Serial.println("WiFi connected");
+  ArduinoOTA.onStart([]() {
+    String type;
+    if (ArduinoOTA.getCommand() == U_FLASH) {
+      type = "sketch";
+    } else {  // U_FS
+      type = "filesystem";
+    }
+
+    // NOTE: if updating FS this would be the place to unmount FS using FS.end()
+    Serial.println("Start updating " + type);
+  });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nEnd");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) {
+      Serial.println("Auth Failed");
+    } else if (error == OTA_BEGIN_ERROR) {
+      Serial.println("Begin Failed");
+    } else if (error == OTA_CONNECT_ERROR) {
+      Serial.println("Connect Failed");
+    } else if (error == OTA_RECEIVE_ERROR) {
+      Serial.println("Receive Failed");
+    } else if (error == OTA_END_ERROR) {
+      Serial.println("End Failed");
+    }
+  });
+  ArduinoOTA.begin();
+
+  // Print the IP address
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {  // Address 0x3D for 128x64
+
+    //    Serial.println(F("SSD1306 allocation failed"));
+
+    for (;;)
+      ;
+  }
+  display.clearDisplay();
+
+  display.setTextSize(1);
+
+  display.setTextColor(WHITE);
+}
+String directionbus;
+void loop()
+
+{
+  ArduinoOTA.handle();
+  if (digitalRead(UP_switch) == HIGH)  directionbus = "UP";
+  if (digitalRead(DOWN_switch) == HIGH)  directionbus = "DOWN";
+  unsigned long currentTime = millis();
+
+  if (ss.available() > 0)
+
+    if (gps.encode(ss.read()))
+
+    {
+      if (currentTime - previousTime >= Interval) {
+        if (gps.location.isValid())
+
+        {
+          latitude = gps.location.lat();
+
+          lat_str = String(latitude, 6);
+
+          longitude = gps.location.lng();
+
+          lng_str = String(longitude, 6);
+
+          latarray[i] = lat_str;
+
+          lngarray[i] = lng_str;
+
+          i++;
+
+          if (i >= 20)
+
+            // {
+
+            i = 0;  // reset to beginning of array, so you don't try to save
+          // readings outside of the bounds of the array
+
+          // }
+
+          display.setCursor(0, 20);
+
+          display.println("Lat:");
+
+          display.setCursor(27, 20);
+
+          display.println(lat_str);
+
+          display.setCursor(0, 40);
+
+          display.println("Lng:");
+
+          display.setCursor(27, 40);
+
+          display.println(lng_str);
+
+          display.display();
+          postdata(latitude, longitude);
+        }
+
+        previousTime = currentTime;
+      }
+    }
+}
+
+void postdata(float lat1, float lng1) {
+  if (WiFi.status() != WL_CONNECTED) return;
+  WiFiClientSecure client;
+  HTTPClient http;
+  client.setInsecure();
+  // Your Domain name with URL path or IP address with path
+  http.begin(client, "https://548ebd.deta.dev/location/new");
+
+  // If you need an HTTP request with a content type: application/json, use the
+  // following:
+  http.addHeader("Content-Type", "application/json");
+  doc["lat"] = lat1;
+  doc["lng"] = lng1;
+  doc["direction"] = directionbus;
+  serializeJson(doc, output);
+
+  int httpResponseCode = http.POST(output);
+
+  // If you need an HTTP request with a content type: text/plain
+  // http.addHeader("Content-Type", "text/plain");
+  // int httpResponseCode = http.POST("Hello, World!");
+
+  //  Serial.print("HTTP Response code: ");
+  //  Serial.println(httpResponseCode);
+
+  // Free resources
+  http.end();
+}
