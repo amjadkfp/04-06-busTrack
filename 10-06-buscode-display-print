@@ -1,0 +1,144 @@
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <ArduinoJson.h>
+#include <ArduinoOTA.h>
+#include <ESP8266HTTPClient.h>
+#include <ESP8266WiFi.h>
+#include <TinyGPS++.h>
+#include <WiFiClientSecure.h>
+#include <Wire.h>
+
+#define SCREEN_WIDTH 128  
+#define SCREEN_HEIGHT 64  
+#define UP_switch D5
+#define DOWN_switch D7
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+TinyGPSPlus gps;  
+const char* ssid = "fiber";
+const char* password = "56948446";
+const char* serverName = "https://548ebd.deta.dev/location/new";  // post
+float latitude, longitude;
+int year, month, date, hour, minute, second;
+String date_str, time_str, lat_str, lng_str;
+String output;
+StaticJsonDocument<196> doc;
+String latarray[20];
+String lngarray[20];
+unsigned int i = 0;
+const unsigned long Interval = 13000;
+unsigned long previousTime = 0;
+void displayPrint(String text, unsigned int line = 1) {
+  display.setCursor(0, line * 10);
+  display.println(text);
+  display.display();
+}
+void setup()
+
+{
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    for (;;);
+  }
+  delay(2000);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  Serial.begin(115200);
+  delay(2000); 
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    display.clearDisplay();
+    displayPrint("Connecting to WIFI...", 2);
+    displayPrint(ssid, 3);
+    displayPrint("OXOX", 4);
+    delay(500);
+    display.clearDisplay();
+    displayPrint("Connecting to WIFI...", 2);
+    displayPrint(ssid, 3);
+    displayPrint("XOXO", 4);
+    delay(500);
+  }
+  display.clearDisplay();
+  displayPrint("WiFi Connected!", 2);
+  pinMode(UP_switch, INPUT_PULLUP);
+  pinMode(DOWN_switch, INPUT_PULLUP);
+  Serial.begin(9600);
+  delay(2000);  // Pause for 2 seconds
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500); 
+  }
+
+  ArduinoOTA.begin();
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {  
+    for (;;)
+      ;
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+}
+String directionbus;
+unsigned long previousTime2 = 0;
+void loop()
+
+{
+  ArduinoOTA.handle();
+  if (digitalRead(UP_switch) == LOW)  directionbus = "UP";
+  if (digitalRead(DOWN_switch) == LOW)  directionbus = "DOWN";
+  Serial.println("dir" + directionbus);
+  unsigned long currentTime = millis();
+  if (Serial.available() > 0)
+    if (gps.encode(Serial.read()))
+    {
+      if (currentTime - previousTime >= Interval) {
+        if (gps.location.isValid())
+        {
+          latitude = gps.location.lat();
+          lat_str = String(latitude, 6);
+          longitude = gps.location.lng();
+          lng_str = String(longitude, 6);
+          latarray[i] = lat_str;
+          lngarray[i] = lng_str;
+          i++;
+          if (i >= 20)
+            i = 0;  
+          display.setCursor(0, 20);
+          display.println("Lat:");
+          display.setCursor(27, 20);
+          display.println(lat_str);
+          display.setCursor(0, 40);
+          display.println("Lng:");
+          display.setCursor(27, 40);
+          display.println(lng_str);
+          display.display();
+        }
+        previousTime = currentTime;
+      }
+    }
+
+  if (currentTime - previousTime2 >= 40000) {
+    if ((latitude != 0) && (longitude != 0)) {
+      postdata(latitude, longitude);
+    }
+//    postdata(latitude, longitude);
+    previousTime2 = currentTime;
+  }
+}
+
+void postdata(float lat1, float lng1) {
+  if (WiFi.status() != WL_CONNECTED) return;
+  WiFiClientSecure client;
+  HTTPClient http;
+  client.setInsecure();
+  http.begin(client, "https://548ebd.deta.dev/location/new");
+  http.addHeader("Content-Type", "application/json");
+  doc["lat"] = lat1;
+  doc["lng"] = lng1;
+  doc["direction"] = directionbus;
+  serializeJson(doc, output);
+  int httpResponseCode = http.POST(output);
+  doc.clear();
+  output = "";
+  http.end();
+}
