@@ -8,164 +8,154 @@
 #include <WiFiClientSecure.h>
 #include <Wire.h>
 
-#define SCREEN_WIDTH 128  // OLED display width, in pixels
-
-#define SCREEN_HEIGHT 64  // OLED display height, in pixels
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
 #define UP_switch D5
 #define DOWN_switch D7
-// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
+#define UPLOAD_INTREVAL 40000
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
-
-TinyGPSPlus gps;  // The TinyGPS++ object
-
-
+TinyGPSPlus gps;
+StaticJsonDocument<196> doc;
 
 const char* ssid = "fiber";
 const char* password = "56948446";
 const char* serverName = "https://548ebd.deta.dev/location/new";  // post
 float latitude, longitude;
-
-int year, month, date, hour, minute, second;
-
-String date_str, time_str, lat_str, lng_str;
 String output;
-StaticJsonDocument<196> doc;
-// int pm;
-
-// int numreadings = 10;
 
 String latarray[20];
-
 String lngarray[20];
-
-// String current_latarray[10], current_lngarray[10], previous_latarray[10],
-// previous_lngarray[10] ;
-
 unsigned int i = 0;
-
 const unsigned long Interval = 13000;
-
 unsigned long previousTime = 0;
+unsigned int directionbus = 0;
+char *stops[] = {"N/A", "MNJRY", "POLY", "SHED", "NLMBR" , "MLPM", "KOTKL", "PALKD"};
+void displayPrint(String text, unsigned int line = 1) {
+  display.setCursor(0, line * 10);
+  display.println(text);
+  display.display();
+}
 
-void setup()
+void bottomBar(String text) {
+  display.setCursor(2, 54);
+  display.fillRect(0, 52, 128, 12, WHITE);
+  display.setTextColor(BLACK, WHITE);
+  display.println(text);
+  display.display();
+  display.setTextColor(WHITE, BLACK);
+}
 
-{
+String last_text = "";
+void displayDesctription(String text) {
+  if (text != last_text) {
+    display.setCursor(0, 34);
+    display.setTextSize(1);
+    display.fillRect(0, 34, 128, 10, BLACK);
+    display.println(text);
+    display.display();
+    last_text = text;
+  }
+}
+
+void displayDirection() {
+  display.setCursor(0, 0);
+  display.setTextSize(4);
+  display.fillRect(0, 0, 128, 30, BLACK);
+  display.println(stops[directionbus]);
+  display.display();
+  display.setTextSize(1);
+}
+
+void setup() {
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    for (;;);
+  }
+  delay(2000);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  Serial.begin(9600);
+  WiFi.begin(ssid, password);
+  display.clearDisplay();
+  while (WiFi.status() != WL_CONNECTED) {
+    bottomBar("Connecting to WIFI...");
+    displayPrint("PROJECT BY", 1);
+    displayPrint("1. AMJAD  4. ANAS KC", 2);
+    displayPrint("2. ANSAB  5. ANAS K", 3);
+    displayPrint("3. NASIF | EL-19-22", 4);
+  }
+  display.clearDisplay();
+  bottomBar("WiFi Connected!");
   pinMode(UP_switch, INPUT_PULLUP);
   pinMode(DOWN_switch, INPUT_PULLUP);
-  Serial.begin(9600);
-
-
-
-  delay(2000);  // Pause for 2 seconds
-
-  WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED)
-
-  {
-    delay(500);
-
-   
-  }
-
-
-
- 
+  ArduinoOTA.setHostname("GPS-BUS-TRACKER");
   ArduinoOTA.begin();
-
-  // Print the IP address
-
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {  // Address 0x3D for 128x64
-
-    //    Serial.println(F("SSD1306 allocation failed"));
-
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     for (;;)
       ;
   }
   display.clearDisplay();
-
   display.setTextSize(1);
-
   display.setTextColor(WHITE);
 }
-String directionbus;
+
 unsigned long previousTime2 = 0;
-void loop()
+unsigned long debounceDelay = 0;
 
-{
+boolean readGPS() {
+  unsigned long startTime = millis();
+  while ((millis() - startTime) < 2000)
+    if (Serial.available() > 0) gps.encode(Serial.read());
+  if (gps.charsProcessed() < 10) {
+    return false;
+  }
+  if (gps.location.isValid())
+  {
+    latitude = gps.location.lat();
+    longitude = gps.location.lng();
+    return true;
+  }
+  return false;
+}
+
+
+void loop() {
   ArduinoOTA.handle();
-  if (digitalRead(UP_switch) == LOW)  directionbus = "UP";
-  if (digitalRead(DOWN_switch) == LOW)  directionbus = "DOWN";
-  Serial.println("dir" + directionbus);
-
-  //  Serial.println(digitalRead(UP_switch));
-  //
-  //  Serial.println(digitalRead(DOWN_switch));
   unsigned long currentTime = millis();
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    bottomBar("Waiting for WIFI...");
+    return;
+  } else {
+    bottomBar("WiFi Connected!");
+  }
+  displayDirection();
 
-  if (Serial.available() > 0)
+  if ((currentTime - debounceDelay) > 400) {
+    if (digitalRead(UP_switch) == LOW && directionbus < 7)  directionbus++;
+    if (digitalRead(DOWN_switch) == LOW && directionbus > 0)  directionbus--;
+    debounceDelay = currentTime;
+  }
 
-    if (gps.encode(ss.read()))
 
-    {
-      if (currentTime - previousTime >= Interval) {
-        if (gps.location.isValid())
-
-        {
-          latitude = gps.location.lat();
-
-          lat_str = String(latitude, 6);
-
-          longitude = gps.location.lng();
-
-          lng_str = String(longitude, 6);
-
-          latarray[i] = lat_str;
-
-          lngarray[i] = lng_str;
-
-          i++;
-
-          if (i >= 20)
-
-            // {
-
-            i = 0;  // reset to beginning of array, so you don't try to save
-          // readings outside of the bounds of the array
-
-          // }
-
-          display.setCursor(0, 20);
-
-          display.println("Lat:");
-
-          display.setCursor(27, 20);
-
-          display.println(lat_str);
-
-          display.setCursor(0, 40);
-
-          display.println("Lng:");
-
-          display.setCursor(27, 40);
-
-          display.println(lng_str);
-
-          display.display();
-
-        }
-
-        previousTime = currentTime;
-      }
+  if (currentTime - previousTime2 >= UPLOAD_INTREVAL) {
+    displayDesctription("Reading GPS Data...");
+    if (readGPS()) {
+      displayDesctription("GPS Data Found!");
+    } else {
+      displayDesctription("Failed to fetch GPS");
     }
 
-
-  if (currentTime - previousTime2 >= 40000) {
     if ((latitude != 0) && (longitude != 0)) {
+      displayDesctription("Uploading GPS Cordinates..");
       postdata(latitude, longitude);
     }
+    //    postdata(latitude, longitude);
     previousTime2 = currentTime;
+  }
+  else {
+    displayDesctription("Data update in: " + String( (UPLOAD_INTREVAL - (currentTime - previousTime2)) / 1000) + "s");
   }
 }
 
@@ -174,28 +164,14 @@ void postdata(float lat1, float lng1) {
   WiFiClientSecure client;
   HTTPClient http;
   client.setInsecure();
-  // Your Domain name with URL path or IP address with path
   http.begin(client, "https://548ebd.deta.dev/location/new");
-
-  // If you need an HTTP request with a content type: application/json, use the
-  // following:
   http.addHeader("Content-Type", "application/json");
   doc["lat"] = lat1;
   doc["lng"] = lng1;
-  doc["direction"] = directionbus;
+  doc["direction"] = stops[directionbus];
   serializeJson(doc, output);
-
   int httpResponseCode = http.POST(output);
   doc.clear();
   output = "";
-
-  // If you need an HTTP request with a content type: text/plain
-  // http.addHeader("Content-Type", "text/plain");
-  // int httpResponseCode = http.POST("Hello, World!");
-
-  //  Serial.print("HTTP Response code: ");
-  //  Serial.println(httpResponseCode);
-
-  // Free resources
   http.end();
 }
